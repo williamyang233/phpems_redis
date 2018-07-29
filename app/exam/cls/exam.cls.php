@@ -18,7 +18,8 @@ class exam_exam
 			$this->db = $this->G->make('pepdo');
 			$this->pg = $this->G->make('pg');
 			$this->ev = $this->G->make('ev');
-			$this->section = $this->G->make('section','exam');
+            $this->redisdo = $this->G->make("redisdo");
+            $this->section = $this->G->make('section','exam');
 			$this->session = $this->G->make('session');
 			$this->question = $this->G->make('question','exam');
 			$this->init = 1;
@@ -30,12 +31,13 @@ class exam_exam
 	//返回值：true
 	public function insertExamSession($args)
 	{
-		$args['examsessionid'] = $this->session->getSessionId();
-		$args['examsessionstarttime'] = TIME;
-		$data = array('examsession',$args);
-		$sql = $this->pdosql->makeInsert($data);
-		$this->db->exec($sql);
-		return true;
+        $args['examsessionid'] = $this->session->getSessionId();
+        $args['examsessionstarttime'] = TIME;
+        $this->redisdo->hmset('examsession:'.$args['examsessionid'],$args);
+        $this->redisdo->sadd('examtype:'.$args['examsessiontype'],$args['examsessionid']);
+        $this->redisdo->sadd('exambasic:'.$args['examsessionbasic'],$args['examsessionid']);
+        $this->redisdo->sadd('exam2user:'.$args['examsessionuserid'],$args['examsessionid']);
+        return true;
 	}
 
 	//清除考试会话
@@ -48,13 +50,19 @@ class exam_exam
 
 	public function clearOutTimeExamSession($time)
     {
-    	if(!$time)
-    	$date = TIME-6*24*3600;
-    	else
-    	$date = $time;
-    	$data = array('examsession',array(array("AND","examsessionstarttime < :date",'date',$date)));
-    	$sql = $this->pdosql->makeDelete($data);
-	    $this->db->exec($sql);
+    	if(!$time){
+            $date = TIME-6*24*3600;
+        }
+    	else{
+            $date = $time;
+        }
+        $sessionlist = $this->redisdo->getlist('examsession');
+        foreach ($sessionlist as $value) {
+            $sessionlogintime = $this->redisdo->hget($value,'examsessionstarttime');
+            if($sessionlogintime < $date){
+                $this->redisdo->hdel($value);
+            }
+        }
     	return true;
     }
 
@@ -65,10 +73,8 @@ class exam_exam
 	{
 		if(!$sessionid)
 		$sessionid = $this->session->getSessionId();
-		$data = array('examsession',$args,array(array("AND","examsessionid = :oldexamsessionid",'oldexamsessionid',$sessionid)));
-		$sql = $this->pdosql->makeUpdate($data);
-		$this->db->exec($sql);
-		return true;
+        $this->redisdo->hmset('examsession:'.$sessionid,$args);
+        return true;
 	}
 
 	//清除会话内容
@@ -76,9 +82,12 @@ class exam_exam
 	{
 		if(!$sessionid)
 		$sessionid = $this->session->getSessionId();
-		$data = array('examsession',array(array("AND","examsessionid = :examsessionid",'examsessionid',$sessionid)));
-		$sql = $this->pdosql->makeDelete($data);
-		$this->db->exec($sql);
+        $sessioninfo = $this->redisdo->hget('examsession:'.$sessionid);
+        $this->redisdo->hdel('examsession:'.$sessionid);
+        $this->redisdo->srem('examtype:'.$sessioninfo['examsessiontype'],$sessionid);
+        $this->redisdo->srem('exambasic:'.$sessioninfo['examsessionbasic'],$sessionid);
+        $this->redisdo->srem('exam2user:'.$sessioninfo['examsessionuserid'],$sessionid);
+
 		return true;
 	}
 
@@ -89,26 +98,43 @@ class exam_exam
 	{
 		if(!$sessionid)
 		$sessionid = $this->session->getSessionId();
-		$data = array(false,'examsession',array(array("AND","examsessionid = :examsessionid",'examsessionid',$sessionid)));
-		$sql = $this->pdosql->makeSelect($data);
-		return $this->db->fetch($sql,array('examsessionquestion','examsessionsign','examsessionsetting','examsessionuseranswer','examsessionscorelist'));
+        $r = $this->redisdo->hget('examsession:'.$sessionid);
+        return $r;
 	}
 
 	public function getExamSessionByUserid($userid,$basicid,$sessionid = 0,$usesession = 0,$type = 2)
 	{
-		if($usesession && !$sessionid)$sessionid = $this->session->getSessionId();
-		$args = array(array("AND","examsessionuserid = :examsessionuserid",'examsessionuserid',$userid));
-		$args[] = array("AND","examsessionbasic = :examsessionbasic",'examsessionbasic',$basicid);
-		if($usesession)$args[] = array("AND","examsessionid = :examsessionid",'examsessionid',$sessionid);
-		if($type)$args[] = array("AND","examsessiontype = :examsessiontype",'examsessiontype',$type);
-		$data = array(false,'examsession',$args,false,"examsessionstarttime DESC");
-		$sql = $this->pdosql->makeSelect($data);
-		return $this->db->fetch($sql,array('examsessionquestion','examsessionsign','examsessionsetting','examsessionuseranswer','examsessionscorelist'));
+        if($usesession && !$sessionid)$sessionid = $this->session->getSessionId();
+        if ($usesession) {
+            return $this->redisdo->hget('examsession:'.$sessionid);
+        }
+        if($type){
+            $sessionlist = call_user_func_array(array($this->redisdo, 'sinter'), array('exam2user:'.$userid,'exambasic:'.$basicid,'examtype:'.$type));
+            if ($sessionlist) {
+                foreach ($sessionlist as $value) {
+                    $data[]=$this->redisdo->hget('examsession:'.$value);
+                }
+                return $data[0];
+            }else{
+                return false;
+            }
+        }else{
+            $sessionlist = call_user_func_array(array($this->redisdo, 'sinter'), array('exam2user:'.$userid,'exambasic:'.$basicid));
+            if ($sessionlist) {
+                foreach ($sessionlist as $value) {
+                    $data[]=$this->redisdo->hget('examsession:'.$value);
+                }
+                return $data[0];
+            }else{
+                return false;
+            }
+        }
 	}
 
 	public function getExamSessionByArgs($args,$page = 1,$number = 20)
 	{
-		$args[] = array("AND","examsession.examsessionuserid = user.userid");
+	    return false;
+		/*$args[] = array("AND","examsession.examsessionuserid = user.userid");
 		$data = array(
 			'select' => false,
 			'table' => array('examsession','user'),
@@ -117,7 +143,7 @@ class exam_exam
 			'serial' => array('examsessionsetting')
 		);
 		$r = $this->db->listElements($page,$number,$data);
-		return $r;
+		return $r;*/
 	}
 
 	//获取考试设置信息列表

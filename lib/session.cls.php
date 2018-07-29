@@ -10,7 +10,8 @@ class session
     public function __construct(&$G)
     {
     	$this->G = $G;
-    	$this->db = $this->G->make("pepdo");
+        $this->redisdo = $this->G->make("redisdo");
+        $this->db = $this->G->make("pepdo");
     	$this->ev = $this->G->make("ev");
     	$this->pdosql = $this->G->make("pdosql");
     	$this->sql = $this->G->make("sql");
@@ -52,9 +53,8 @@ class session
     	}
     	if(!$this->getSessionValue($this->sessionid))
 		{
-			$data = array('session',array('sessionid'=>$this->sessionid,'sessionuserid'=>0,'sessionip'=>$this->ev->getClientIp()));
-    		$sql = $this->pdosql->makeInsert($data);
-    		$this->db->exec($sql);
+			$data = array('sessionid'=>$this->sessionid,'sessionuserid'=>0,'sessionip'=>$this->ev->getClientIp());
+            $result=$this->redisdo->hmset('session:'.$this->sessionid,$data);
 		}
     	return $this->sessionid;
     }
@@ -72,16 +72,14 @@ class session
 	    	}
     	}
     	if(!$this->sessionid)$this->getSessionId();
-    	$data = array('session',array('sessionrandcode'=>$randCode),array(array("AND","sessionid = :sessionid",'sessionid',$this->sessionid)));
-	    $sql = $this->pdosql->makeUpdate($data);
-    	$r = $this->db->exec($sql);
-    	if($r)return $randCode;
+    	$data = array('sessionrandcode'=>$randCode);
+        $r=$this->redisdo->hmset('session:'.$this->sessionid,$data);
+	    if($r)return $randCode;
     	else
     	{
-    		$data = array('session',array('sessionid'=>$this->sessionid,'sessionuserid'=>0,'sessionip'=>$this->ev->getClientIp()));
-    		$sql = $this->pdosql->makeInsert($data);
-    		$this->db->exec($sql);
-    		return $this->setRandCode($randCode);
+    		$data = array('sessionid'=>$this->sessionid,'sessionuserid'=>0,'sessionip'=>$this->ev->getClientIp());
+            $this->redisdo->hmset('session:'.$this->sessionid,$data);
+            return $this->setRandCode($randCode);
     	}
     }
 
@@ -89,10 +87,9 @@ class session
     public function getRandCode()
     {
     	if(!$this->sessionid)$this->getSessionId();
-    	$data = array('sessionrandcode','session',array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
-    	$sql = $this->pdosql->makeSelect($data);
-    	$r = $this->db->fetch($sql);
-    	return $r['randcode'];
+    	//$data = array('sessionrandcode','session',array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
+    	$r = $this->redisdo->hget('session:'.$this->sessionid);
+    	return $r['sessionrandcode'];
     }
 
     //获取会话内容
@@ -103,9 +100,9 @@ class session
     		if(!$this->sessionid)$this->getSessionId();
     		$sessionid = $this->sessionid;
     	}
-    	$data = array(false,'session',array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
-    	$sql = $this->pdosql->makeSelect($data);
-    	return $this->db->fetch($sql);
+    	//$data = array(false,'session',array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
+        return $this->redisdo->hget('session:'.$this->sessionid);
+
     }
 
     //设置会话用户信息
@@ -114,16 +111,13 @@ class session
     	if(!$args)return false;
     	else
     	{
-	    	if(!$args['sessiontimelimit'])$args['sessiontimelimit'] = TIME;
+            if(!$args['sessiontimelimit'])$args['sessiontimelimit'] = TIME;
 	    	if(!$this->sessionid)$this->getSessionId();
 	    	$args['sessionid'] = $this->sessionid;
 	    	$args['sessiontimelimit'] = TIME;
-	    	$data = array('session',array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
-	    	$sql = $this->pdosql->makeDelete($data);
-	    	$this->db->exec($sql);
-	    	$data = array('session',$args);
-	    	$sql = $this->pdosql->makeInsert($data);
-	    	$this->db->exec($sql);
+            $this->redisdo->remove('session:'.$this->sessionid);
+            $this->redisdo->hmset('session:'.$this->sessionid,$args);
+            $this->redisdo->set('session2user:'.$args['sessionuserid'],$this->sessionid);
 	    	$this->ev->setCookie($this->sessionname,$this->strings->encode($args),3600*24);
 	    	$_SESSION['currentuser'] = $args;
 	    	return true;
@@ -137,9 +131,10 @@ class session
     	else
     	{
 	    	if(!$this->sessionid)$this->getSessionId();
-	    	$data = array('session',$args,array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
-	    	$sql = $this->pdosql->makeUpdate($data);
-	    	$this->db->exec($sql);
+            $this->redisdo->hmset('session:'.$this->sessionid,$args);
+            //$data = array('session',$args,array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
+	    	//$sql = $this->pdosql->makeUpdate($data);
+	    	//$this->db->exec($sql);
 	    	return true;
     	}
     }
@@ -177,26 +172,28 @@ class session
     {
     	if(!$this->sessionid)$this->getSessionId();
     	$this->ev->setCookie($this->sessionname,NULL);
-    	$data = array('session',array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
-		$sql = $this->pdosql->makeDelete($data);
-		$this->db->exec($sql);
-		return true;
+    	//$data = array('session',array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
+		//$sql = $this->pdosql->makeDelete($data);
+		//$this->db->exec($sql);
+        $userid = $this->redisdo->hget('session:'.$this->sessionid,'sessionuserid');
+        $this->redisdo->remove('session2user:'.$userid);
+        $this->redisdo->remove('session:'.$this->sessionid);
+	    return true;
     }
 
     public function offOnlineUser($userid)
     {
-    	$data = array('session',array(array('AND',"sessionuserid = :sessionuserid",'sessionuserid',$userid)));
-    	$sql = $this->pdosql->makeDelete($data);
-	    $this->db->exec($sql);
-    	return true;
+        $sessionid=$this->redisdo->get('session2user:'.$userid);
+        $this->redisdo->hdel('session:'.$sessionid);
+        $this->redisdo->remove('session2user:'.$userid);
+	    return true;
     }
 
     //清除所有会话
     public function clearSession()
     {
-    	$data = array('session',array(array('AND',1)));
-    	$sql = $this->pdosql->makeDelete($data);
-	    $this->db->exec($sql);
+        $this->redisdo->multidel('session');
+        $this->redisdo->multidel('session2user');
     	return true;
     }
 
@@ -207,16 +204,24 @@ class session
     	$date = $time;
     	else
     	$date = TIME-24*3600;
-    	$data = array('session',array(array('AND',"sessionlogintime < :sessionlogintime",'sessionlogintime',$date)));
-    	$sql = $this->pdosql->makeDelete($data);
-	    $this->db->exec($sql);
+        $sessionlist = $this->redisdo->getlist('session');
+        foreach ($sessionlist as $value) {
+            $sessionlogintime = $this->redisdo->hget($value,'sessionlogintime');
+            if($sessionlogintime < $date){
+                if($this->redisdo->hget($value,'sessionuserid')) $this->redisdo->remove('session2user:'.$value);
+                $this->redisdo->hdel($value);
+            }
+        }
+        //$data = array('session',array(array('AND',"sessionlogintime < :sessionlogintime",'sessionlogintime',$date)));
+    	//$sql = $this->pdosql->makeDelete($data);
+	    //$this->db->exec($sql);
     	return true;
     }
 
     //获取所有会话用户列表
     public function getSessionUserList($page,$number = 20)
     {
-    	$data = array(
+    	/*$data = array(
 			'select' => false,
 			'table' => 'session',
 			'index' => false,
@@ -225,12 +230,28 @@ class session
 			'orderby' => 'sessionlogintime DESC',
 			'groupby' => false
 		);
-		return $this->db->listElements($page,$number,$data);
+		return $this->db->listElements($page,$number,$data);*/
+        $list = $this->redisdo->getlist('session2user');
+        foreach ($list as $value) {
+            if ($value=='session2user:0') {
+                continue;
+            }
+            $sessionid = $this->redisdo->get($value);
+            $data[] = $this->redisdo->hmet($sessionid);
+        }
+
+        $fieldArr = array();
+        foreach ($data as $k => $v) {
+            $fieldArr[$k] = $v[$sessionlogintime];
+        }
+        array_multisort($fieldArr, SORT_DESC, $data);
+        return $data;
     }
 
     public function __destruct()
     {
-    	$data = array('session',array('sessionlasttime' => TIME),array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
+        $this->redisdo->hmset('session:'.$this->sessionid,array('sessionlasttime' => TIME));
+    	/*$data = array('session',array('sessionlasttime' => TIME),array(array('AND',"sessionid = :sessionid",'sessionid',$this->sessionid)));
     	$sql = $this->pdosql->makeUpdate($data);
     	$this->db->exec($sql);
     	if(rand(0,5) > 4)
@@ -238,7 +259,7 @@ class session
     		$data = array('session',array(array('AND',"sessionlasttime <= :sessionlasttime","sessionlasttime",intval((TIME - 3600*24*3)))));
 	    	$sql = $this->pdosql->makeDelete($data);
 	    	$this->db->exec($sql);
-    	}
+    	}*/
     }
 }
 ?>

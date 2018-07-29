@@ -12,7 +12,7 @@ class pepdo
     public $G;
     private $queryid = 0;
     private $linkid = 0;
-    private $log = 1;
+    private $log = 0;
 
     public function __construct(&$G)
     {

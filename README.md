@@ -1,32 +1,16 @@
-# phpems v5.0
-开源免费的PHP无纸化模拟考试系统，基于 [PHPEMS](http://www.phpems.net) 修改。
-重点修复BUG(包括所有非 E_NOTICE 级别错误提示)，并根据个人需要优化新增一些功能。
+# phpems v5.0 with redis
+开源免费的PHP无纸化模拟考试系统，基于 [oiuv/phpems](https://github.com/oiuv/phpems)对[PHPEMS](http://www.phpems.net) 修改的基础之上。
+使用redis驱动整个系统的session和examsession，大大减少系统运行时的I/O，提高运行速度。
 
-源码默认开启错误提示，生产环境一定要修改 `init.cls.php` 文件关闭。
 
 ## 安装
 
-    git clone git@github.com:oiuv/phpems.git
-    cd phpems
+    git clone git@github.com:williamyang233/phpems_redis.git
+    cd phpems_redis
     composer install
     
 安装完成后，修改 `/lib/config.inc.php` 配置文件并导入数据库`phpems5.sql`
 
-
-## 优化&新增功能
-
-- 新增使用composer，可直接安装第三方扩展包
-- 为所有数据表定义 [Model](https://laravel-china.org/docs/laravel/5.6/eloquent/1403) ，数据库操作更灵活方便
-- 可在线[数据库迁移](https://laravel-china.org/docs/laravel/5.6/migrations/1400)，请参考根目录下 `Database.php`
-- 新增部分字符串和数组[辅助函数](https://laravel-china.org/docs/laravel/5.6/helpers/1391)，如：dd()
-
-使用 ORM 操作数据库示例：
-````php
-// 获取userid为1的用户
-$user = \Model\User::find(1);
-
-dd($user->getAttributes());
-````
 
 
 ## 关于系统的二次开发说明：
